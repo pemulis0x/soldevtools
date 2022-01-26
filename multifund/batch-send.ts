@@ -8,22 +8,30 @@ import {
     sendAndConfirmTransaction,
 } from "@solana/web3.js";
 
+const fs = require('fs');
+
 /*
     USAGE:
     ts-node batch-send.ts <NETWORK> <AMOUNT>
+
+    # mainnet:      ts-node batch-send.ts mainnet max
+    # devnet:       ts-node batch-send.ts devnet max
+    # localnet:     ts-node batch-send.ts localnet max
 */
 
-require("dotenv").config();                 // load config file
+const env_parse = require("dotenv").config();                 // load config file
 const [env] = process.argv.slice(2);        // cli arg for mainnet/devnet/localnet
 const [amt] = process.argv.slice(3);        // cli arg for amount to distribute ("max" or integer)
 
-// snag private key and rpc endpoints from the .env file
+// snag private key, rpc endpoints, and the list of dest addrs from the .env file
 const PRIVKEY: string = process.env["private_key"];
 const MAINNET_RPC: string = process.env["mainnetRPC"];
 const DEVNET_RPC: string = process.env["devnetRPC"];
-const LOCALNET_RPC: string = "http://127.0.0.1:8899";
+const LOCALNET_RPC: string = process.env["localnetRPC"];
 const CSV_PATH: string = process.env["csv_path"];
-const FEES_PER_TRANSFER: number = 1000;                 // I think this is ballpark accurate idk
+
+const NUM_TEST_PAYEES: number = 10;
+const FEES_PER_TRANSFER: number = 2000;                 // I think this is ballpark accurate idk
 const MAX_INSTRUCTIONS_PER_TX: number = 20;             // compute constraints
 
 
@@ -36,13 +44,18 @@ function generate_payees (num_accounts: number): Array<PublicKey> {
     return payees;
 }
 
-
 function payees_from_csv (path: string): Array<PublicKey> {
-    let payees: Array<PublicKey>;
-    // TODO: load a list of public keys from a csv
+    let payees: Array<PublicKey> = [];
+    let data = fs.readFileSync(path)
+        .toString() // convert Buffer to string
+        .split('\n') // split string to lines
+        .map(e => e.trim()); // remove white spaces for each line
+    
+    for (let addr of data){
+        payees.push(new PublicKey(addr));
+    }
     return payees;
 }
-
 
 const main = async () => {
     // pull in a private key from the .env file and setup the web3js keypair
@@ -75,7 +88,7 @@ const main = async () => {
     let payees: Array<PublicKey>;
     if ( env != "mainnet" ) {
         // if testing on local/devnet, make new test accounts
-        payees = generate_payees(50);
+        payees = generate_payees(NUM_TEST_PAYEES);
     } else {
         // if we're on mainnet, use a CSV
         payees = payees_from_csv(CSV_PATH);
@@ -92,7 +105,7 @@ const main = async () => {
     }
 
     // make sure the payer is solvent for the desired distribution amount
-    if ( payerBalance < DISTRIBUTION_AMOUNT ) {
+    if ( payerBalance < DISTRIBUTION_AMOUNT + EST_TX_COST) {
         if ( env != "mainnet" )  {
             // if we're not on mainnet, request a solana airdrop
             console.log("insufficient SOL balance; requesting %s SOL airdrop...\n", 
